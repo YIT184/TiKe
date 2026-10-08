@@ -8,8 +8,6 @@
 
 ## 页面预览
 
-以下图片由实际应用页面渲染生成。记录和统计页使用虚构演示数据；公开安装包首次安装时没有预置练习记录。
-
 <table>
   <tr><th>环形计时</th><th>经典计时</th><th>练习记录</th></tr>
   <tr>
@@ -43,7 +41,7 @@
 
 ## 安装与使用
 
-1. 在 [Releases](https://github.com/YIT184/tike/releases/latest) 下载 `tike-v1.5.1.apk`，在 Android 手机上安装。
+1. 在 [发布](https://github.com/YIT184/tike/releases/latest) 下载 `tike-v1.5.1.apk`，在 Android 手机上安装。
 2. 选择计时模式、模块及计划题数，点击“开始”。
 3. 完成练习后点击结束，填写实际题数、正确题数及备注，保存记录。
 4. 在“记录”和“统计”查看训练情况，在“设置”调整布局、提醒方式和计时辅助。
