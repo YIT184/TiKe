@@ -54,7 +54,10 @@ object CsvExporter {
                 session.accuracy?.let { String.format(Locale.US, "%.2f%%", it * 100) } ?: "",
                 if (session.recoveredFromScreenshot) {
                     listOfNotNull(session.note, "[截图恢复：开始时间精确到分钟，用时精确到秒；结束时间为估算，暂停时长未知按0保存。]").joinToString("\n")
-                } else session.note ?: ""
+                } else listOfNotNull(
+                    session.segmentIndex?.let { "[分段 $it/${session.segmentCount}]" },
+                    session.note
+                ).joinToString("\n")
             )
             writer.write(row.joinToString(",") { escapeCsvField(it) })
             writer.write("\r\n")

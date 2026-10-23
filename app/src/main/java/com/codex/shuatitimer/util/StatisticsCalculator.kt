@@ -90,17 +90,19 @@ object StatisticsCalculator {
         allTimeTotalCount: Int,
         allTimeTotalDuration: Long,
         allTimeTotalQuestions: Long,
-        allTimeTotalCorrect: Long
+        allTimeTotalCorrect: Long,
+        allTimeTimedQuestionDurationMs: Long = allTimeTotalDuration,
+        allTimeGradedQuestionCount: Long = allTimeTotalQuestions
     ): OverallStats {
         val todayDuration = todaySessions.sumOf { it.effectiveElapsedMs }
         val last7Duration = last7DaysSessions.sumOf { it.effectiveElapsedMs }
 
-        val allTimeAccuracy = if (allTimeTotalQuestions > 0) {
-            allTimeTotalCorrect.toDouble() / allTimeTotalQuestions.toDouble()
+        val allTimeAccuracy = if (allTimeGradedQuestionCount > 0) {
+            allTimeTotalCorrect.toDouble() / allTimeGradedQuestionCount.toDouble()
         } else null
 
-        val allTimeAvgSec = if (allTimeTotalQuestions > 0 && allTimeTotalDuration > 0) {
-            (allTimeTotalDuration / 1000.0) / allTimeTotalQuestions
+        val allTimeAvgSec = if (allTimeTotalQuestions > 0 && allTimeTimedQuestionDurationMs > 0) {
+            (allTimeTimedQuestionDurationMs / 1000.0) / allTimeTotalQuestions
         } else null
 
         return OverallStats(

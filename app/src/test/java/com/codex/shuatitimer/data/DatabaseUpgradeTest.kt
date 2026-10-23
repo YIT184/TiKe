@@ -42,7 +42,7 @@ class DatabaseUpgradeTest {
         assertTrue(backup.exists())
         val originalBytes = backup.readBytes()
         val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, "shuati_timer.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2).addCallback(AppDatabase.SEED_CALLBACK).build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).addCallback(AppDatabase.SEED_CALLBACK).build()
         try {
             val rows = upgraded.sessionDao().allForSync()
             assertEquals(2, rows.size)
@@ -58,6 +58,9 @@ class DatabaseUpgradeTest {
             assertEquals(18, row.questionCount)
             assertEquals(15, row.correctCount)
             assertEquals("原版备注", row.note)
+            assertNull(row.segmentGroupId)
+            assertNull(row.segmentIndex)
+            assertEquals(0L, row.segmentStartElapsedMs)
             assertFalse(row.deleted)
             assertTrue(row.syncId.isNotBlank())
             assertEquals(2, rows.map { it.syncId }.toSet().size)
@@ -77,7 +80,7 @@ class DatabaseUpgradeTest {
             }
         }
         val reopened = Room.databaseBuilder(context, AppDatabase::class.java, "shuati_timer.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2).addCallback(AppDatabase.SEED_CALLBACK).build()
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).addCallback(AppDatabase.SEED_CALLBACK).build()
         try {
             val active = reopened.moduleDao().observeActive().first().map { it.name }
             assertTrue("持久模块" in active)

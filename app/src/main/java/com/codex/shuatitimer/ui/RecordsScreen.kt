@@ -281,11 +281,17 @@ private fun SessionCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    TimeUtils.formatDateTime(session.startWallClock),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    session.segmentIndex?.let { index ->
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text("第 $index / ${session.segmentCount} 段", Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(Modifier.height(5.dp))
+                    }
+                    Text(TimeUtils.formatDateTime(session.startWallClock), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Divider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(
@@ -294,8 +300,8 @@ private fun SessionCard(
                     .padding(20.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                MetricBlock("完成", "${session.questionCount ?: 0} 题")
-                MetricBlock("正确", "${session.correctCount ?: 0} 题")
+                MetricBlock("完成", session.questionCount?.let { "$it 题" } ?: "—")
+                MetricBlock("正确", session.correctCount?.let { "$it 题" } ?: "—")
                 MetricBlock(
                     "正确率",
                     session.accuracy?.let { String.format(Locale.CHINA, "%.0f%%", it * 100) } ?: "—"

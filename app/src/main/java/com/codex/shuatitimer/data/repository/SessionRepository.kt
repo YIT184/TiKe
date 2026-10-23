@@ -24,6 +24,18 @@ class SessionRepository(private val db: AppDatabase) {
         dao.insert(session.copy(updatedAt = nextRevision()))
     }
 
+    /** All segments are committed together, so a failed save can safely be retried. */
+    suspend fun insertSegments(sessions: List<Session>) = db.withTransaction {
+        require(sessions.isNotEmpty()) { "没有可保存的分段" }
+        val activeNames = modules.all().filterNot { it.deleted }.map { it.name }.toSet()
+        require(sessions.all { it.subject in activeNames }) { "有模块已被删除，请重新选择" }
+        val revision = nextRevision()
+        sessions.forEach { session ->
+            val existing = dao.findBySyncId(session.syncId)
+            dao.insert(session.copy(id = existing?.id ?: 0L, updatedAt = revision))
+        }
+    }
+
     suspend fun update(session: Session) = db.withTransaction {
         val current = dao.findBySyncId(session.syncId)
         if (current != null && !current.deleted) {

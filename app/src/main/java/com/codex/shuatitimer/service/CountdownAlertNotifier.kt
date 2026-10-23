@@ -23,7 +23,9 @@ import com.codex.shuatitimer.util.TimeUtils
 
 object CountdownAlertNotifier {
     internal const val NOTIFICATION_ID = 41002
-    internal const val CHANNEL_ALARM = "countdown_alarm_v1"
+    internal const val CHANNEL_ALARM = "countdown_alarm_v2"
+    const val ACTION_SILENCE = "com.codex.shuatitimer.action.SILENCE_ALARM"
+    const val EXTRA_TIMER_ID = "alarm_timer_id"
     private const val REQUEST_OPEN_FINISH = 41104
 
     fun createChannel(context: Context) {
@@ -39,7 +41,9 @@ object CountdownAlertNotifier {
             description = "倒计时归零时使用闹钟提示音提醒"
             enableVibration(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+            // Playback is controlled by the service so changing the sound and stopping it
+            // does not depend on immutable notification-channel settings.
+            setSound(null,
                 AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
         }
@@ -66,23 +70,50 @@ object CountdownAlertNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarmMode = CountdownReminderSettings(context).mode == CountdownReminderMode.ALARM
-        val notification = NotificationCompat.Builder(context, if (alarmMode) CHANNEL_ALARM else TimerService.CHANNEL_COMPLETE)
+        val silence = PendingIntent.getBroadcast(context, 41105,
+            Intent(context, CountdownAlarmReceiver::class.java).setAction(ACTION_SILENCE)
+                .putExtra(EXTRA_TIMER_ID, snapshot.sessionId),
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val builder = NotificationCompat.Builder(context, if (alarmMode) CHANNEL_ALARM else TimerService.CHANNEL_COMPLETE)
             .setSmallIcon(R.drawable.ic_stat_timer)
             .setContentTitle("${snapshot.subject}倒计时结束")
             .setContentText("计时仍在继续 · 已超时 ${TimeUtils.formatDuration(snapshot.overtimeDurationMs)}，点击完成并记录")
             .setContentIntent(openFinish)
-            .setAutoCancel(true)
+            .setAutoCancel(!alarmMode)
+            .setOngoing(alarmMode)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(if (alarmMode) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
-            .build()
+            .setDefaults(if (alarmMode) NotificationCompat.DEFAULT_VIBRATE else NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+        if (alarmMode) builder.addAction(R.drawable.ic_stop, "关闭铃声", silence).setDeleteIntent(silence)
+        val notification = builder.build()
         if (!store.markCountdownAlertSent()) return false
+        store.setAlarmRinging(alarmMode)
         return try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            if (alarmMode) {
+                try {
+                    ContextCompat.startForegroundService(context, TimerService.intent(context, TimerService.ACTION_START_ALARM))
+                } catch (_: RuntimeException) {
+                    // An already-running timer can still play the alert if a vendor denies
+                    // a redundant foreground-service start from the deadline receiver.
+                    AlarmSoundPlayer.sync(context.applicationContext)
+                }
+            }
             true
-        } catch (_: SecurityException) {
+        } catch (_: RuntimeException) {
+            store.setAlarmRinging(false)
             false
         }
+    }
+
+    fun silence(context: Context) {
+        TimerStateStore(context).setAlarmRinging(false)
+        dismiss(context)
+    }
+
+    fun dismiss(context: Context) {
+        AlarmSoundPlayer.stop()
+        context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 }

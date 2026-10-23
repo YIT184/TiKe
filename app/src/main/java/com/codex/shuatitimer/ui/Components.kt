@@ -19,9 +19,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -52,23 +54,17 @@ fun ArtfulBackground(content: @Composable BoxScope.() -> Unit) {
     ) {
         Canvas(Modifier.fillMaxSize()) {
             drawCircle(
-                color = primary.copy(alpha = 0.055f),
+                color = primary.copy(alpha = 0.028f),
                 radius = size.minDimension * 0.42f,
                 center = Offset(size.width * 1.06f, size.height * 0.05f)
             )
             drawCircle(
-                color = secondary.copy(alpha = 0.04f),
+                color = secondary.copy(alpha = 0.022f),
                 radius = size.minDimension * 0.28f,
                 center = Offset(-size.width * 0.03f, size.height * 0.72f)
             )
-            drawLine(
-                color = primary.copy(alpha = 0.09f),
-                start = Offset(size.width * 0.82f, 0f),
-                end = Offset(size.width, size.height * 0.14f),
-                strokeWidth = 2f
-            )
         }
-        content()
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) { content() }
     }
 }
 
@@ -92,7 +88,7 @@ fun ScreenHeader(
                 letterSpacing = 1.8.sp
             )
             Spacer(Modifier.height(5.dp))
-            Text(title, style = MaterialTheme.typography.headlineLarge)
+            Text(title, style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
             if (subtitle.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -115,9 +111,9 @@ fun PaperCard(
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Box(Modifier.padding(contentPadding)) { content() }
     }

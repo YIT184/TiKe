@@ -14,4 +14,11 @@ class CountdownReminderSettings(context: Context) {
         set(value) {
             preferences.edit().putString("mode", value.name).apply()
         }
+
+    val soundUri: String? get() = preferences.getString("sound_uri", null)
+    val soundName: String get() = preferences.getString("sound_name", null) ?: "系统默认闹铃"
+
+    fun setSound(uri: String?, name: String = "系统默认闹铃") {
+        preferences.edit().putString("sound_uri", uri).putString("sound_name", name).commit()
+    }
 }

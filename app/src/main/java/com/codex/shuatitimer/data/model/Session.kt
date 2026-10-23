@@ -49,7 +49,11 @@ data class Session(
     val syncId: String = UUID.randomUUID().toString(),
     val updatedAt: Long = 0,
     val deleted: Boolean = false,
-    val recoveredFromScreenshot: Boolean = false
+    val recoveredFromScreenshot: Boolean = false,
+    val segmentGroupId: String? = null,
+    val segmentIndex: Int? = null,
+    val segmentCount: Int? = null,
+    @androidx.room.ColumnInfo(defaultValue = "0") val segmentStartElapsedMs: Long = 0L
 ) {
     /**
      * Computed accuracy as a fraction (0.0 to 1.0), or null when not computable.
@@ -75,7 +79,10 @@ data class Session(
     /** The saved amount of time a countdown session exceeded its target duration. */
     val overtimeDurationMs: Long
         get() = if (mode == "COUNT_DOWN") {
-            max(0L, effectiveElapsedMs - (targetDurationMs ?: Long.MAX_VALUE))
+            targetDurationMs?.let { target ->
+                max(0L, segmentStartElapsedMs + effectiveElapsedMs - target) -
+                    max(0L, segmentStartElapsedMs - target)
+            } ?: 0L
         } else {
             0L
         }

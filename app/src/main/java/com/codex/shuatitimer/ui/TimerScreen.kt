@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -30,15 +31,11 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.Flag
-import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,22 +47,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.codex.shuatitimer.AppViewModel
-import com.codex.shuatitimer.FinishDialogState
 import com.codex.shuatitimer.TimerSetupUiState
 import com.codex.shuatitimer.data.model.TimerMode
 import com.codex.shuatitimer.data.model.TimerUiStyle
 import com.codex.shuatitimer.timer.TimerStateStore
-import com.codex.shuatitimer.ui.theme.Vermilion
 import com.codex.shuatitimer.util.TimeUtils
 
 @Composable
@@ -82,6 +77,9 @@ fun TimerScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
                     scaffoldPadding = scaffoldPadding,
                     onPause = viewModel::pauseTimer,
                     onResume = viewModel::resumeTimer,
+                    onSplit = viewModel::splitTimer,
+                    onUndoSplit = viewModel::undoSplit,
+                    onSilence = viewModel::silenceAlarm,
                     onFinish = viewModel::requestFinish,
                     onDiscard = viewModel::discardTimer
                 )
@@ -91,6 +89,9 @@ fun TimerScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
                     scaffoldPadding = scaffoldPadding,
                     onPause = viewModel::pauseTimer,
                     onResume = viewModel::resumeTimer,
+                    onSplit = viewModel::splitTimer,
+                    onUndoSplit = viewModel::undoSplit,
+                    onSilence = viewModel::silenceAlarm,
                     onFinish = viewModel::requestFinish,
                     onDiscard = viewModel::discardTimer
                 )
@@ -119,10 +120,12 @@ fun TimerScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
     }
 
     if (finishDialog.visible) {
-        FinishSessionDialog(
+        FinishSegmentsSheet(
             state = finishDialog,
+            modules = setup.modules,
             onDismiss = viewModel::cancelFinish,
-            onSave = viewModel::saveFinishedSession
+            onCreateModule = viewModel::addSegmentModule,
+            onSave = viewModel::saveFinishedSegments
         )
     }
 }
@@ -135,9 +138,12 @@ private fun TimerSetupContent(
 ) {
     var showModules by remember { mutableStateOf(false) }
     val moduleListState = rememberLazyListState()
-    LaunchedEffect(setup.selectedSubject, setup.modules) {
+    val moduleRowReady by remember { derivedStateOf { moduleListState.layoutInfo.totalItemsCount > 0 } }
+    LaunchedEffect(setup.selectedSubject, setup.modules, moduleRowReady) {
         val index = setup.modules.indexOf(setup.selectedSubject)
-        if (index >= 0) moduleListState.animateScrollToItem(index)
+        if (moduleRowReady && index >= 0 && moduleListState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+            moduleListState.animateScrollToItem(index)
+        }
     }
     if (showModules) {
         ModuleManager(setup.modules, viewModel::addModule, viewModel::deleteModule) { showModules = false }
@@ -157,13 +163,13 @@ private fun TimerSetupContent(
             ScreenHeader(
                 eyebrow = "Focus journal",
                 title = "题刻",
-                subtitle = "把速度、正确率和每一次专注都留下来。"
+                subtitle = ""
             )
         }
         item {
             PaperCard {
                 Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    SectionTitle("01", "选择计时方式", "正计时适合套题，倒计时超时后会继续记录")
+                    SectionTitle("01", "计时方式")
                     ModeSelector(setup.mode, viewModel::setMode)
                     AnimatedVisibility(setup.mode == TimerMode.COUNT_DOWN) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -204,7 +210,7 @@ private fun TimerSetupContent(
         item {
             PaperCard {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    SectionTitle("02", "今天练什么", "按模块积累，统计页会自动对比")
+                    SectionTitle("02", "练习模块")
                     LazyRow(state = moduleListState, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(setup.modules, key = { it }) { subject ->
                             val selected = setup.selectedSubject == subject
@@ -266,15 +272,6 @@ private fun TimerSetupContent(
                 Spacer(Modifier.width(9.dp))
                 Text("开始这轮练习", style = MaterialTheme.typography.titleMedium)
             }
-            Text(
-                "数据保存在本机，可在“设置”中打开设备同步",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
@@ -347,6 +344,9 @@ private fun ActiveTimerContent(
     scaffoldPadding: PaddingValues,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    onSplit: () -> Boolean,
+    onUndoSplit: () -> Unit,
+    onSilence: () -> Unit,
     onFinish: () -> Unit,
     onDiscard: () -> Unit
 ) {
@@ -364,17 +364,15 @@ private fun ActiveTimerContent(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         ScreenHeader(
-            eyebrow = if (snapshot.completed) "Session complete" else "In focus",
-            title = snapshot.subject,
-            subtitle = when {
-                snapshot.completed -> "做得好。把这次练习的结果记下来。"
-                snapshot.running -> "先把眼前这一题做完，再看时间。"
-                else -> "计时已暂停，准备好再继续。"
-            }
+            eyebrow = "In focus",
+            title = "题刻",
+            subtitle = ""
         )
-        Spacer(Modifier.height(30.dp))
-        TimerDial(snapshot, Modifier.size(294.dp))
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(snapshot.subject, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(16.dp))
+        TimerDial(snapshot, Modifier.widthIn(max = 280.dp).fillMaxWidth().aspectRatio(1f))
+        Spacer(Modifier.height(20.dp))
 
         if (snapshot.hasReachedTarget) {
             Surface(
@@ -417,38 +415,7 @@ private fun ActiveTimerContent(
             Spacer(Modifier.height(24.dp))
         }
 
-        if (!snapshot.completed) {
-            FilledTonalButton(
-                onClick = if (snapshot.running) onPause else onResume,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(19.dp)
-            ) {
-                Icon(
-                    if (snapshot.running) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
-                    null
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(if (snapshot.running) "暂停一下" else "继续专注")
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-        Button(
-            onClick = onFinish,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (snapshot.completed) Vermilion
-                else MaterialTheme.colorScheme.primary
-            ),
-            shape = RoundedCornerShape(19.dp)
-        ) {
-            Icon(if (snapshot.completed) Icons.Default.Check else Icons.Outlined.StopCircle, null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (snapshot.completed) "记录本轮成果" else "完成并记录")
-        }
+        SegmentTimerControls(snapshot, onSplit, onUndoSplit, onPause, onResume, onFinish, onSilence)
         TextButton(
             onClick = { showDiscardDialog = true },
             modifier = Modifier.padding(top = 7.dp)
@@ -475,130 +442,4 @@ private fun ActiveTimerContent(
             }
         )
     }
-}
-
-@Composable
-private fun FinishSessionDialog(
-    state: FinishDialogState,
-    onDismiss: () -> Unit,
-    onSave: (String, String, String) -> String?
-) {
-    var questions by remember(state.finishWallClock) {
-        mutableStateOf(state.snapshot.plannedQuestionCount?.toString().orEmpty())
-    }
-    var correct by remember(state.finishWallClock) { mutableStateOf("") }
-    var note by remember(state.finishWallClock) { mutableStateOf("") }
-    var error by remember(state.finishWallClock) { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Check, null) },
-        title = { Text("记录本轮成果") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(15.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(state.snapshot.subject, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "实际用时",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Text(TimeUtils.formatDuration(state.snapshot.effectiveElapsedMs))
-                    }
-                }
-                if (
-                    state.snapshot.mode == TimerMode.COUNT_DOWN &&
-                    state.snapshot.targetDurationMs != null
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(15.dp),
-                        color = if (state.snapshot.hasReachedTarget) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        }
-                    ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text("目标 ${TimeUtils.formatDuration(state.snapshot.targetDurationMs)}")
-                                if (state.snapshot.hasReachedTarget) {
-                                    Text(
-                                        "超时 ${TimeUtils.formatDuration(state.snapshot.overtimeDurationMs)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                }
-                            }
-                            Text(
-                                if (state.snapshot.hasReachedTarget) "已超时" else "按时完成",
-                                color = if (state.snapshot.hasReachedTarget) {
-                                    MaterialTheme.colorScheme.onErrorContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                }
-                            )
-                        }
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = questions,
-                        onValueChange = { questions = it.filter(Char::isDigit).take(4) },
-                        label = { Text("实际题数") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = correct,
-                        onValueChange = { correct = it.filter(Char::isDigit).take(4) },
-                        label = { Text("正确题数") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it.take(200) },
-                    label = { Text("复盘备注（选填）") },
-                    placeholder = { Text("例如：资料题最后两题超时") },
-                    minLines = 2,
-                    maxLines = 4,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (error != null) {
-                    Text(
-                        error.orEmpty(),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = {
-                error = onSave(questions, correct, note)
-            }) { Text("保存记录") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("返回") }
-        }
-    )
 }

@@ -699,6 +699,9 @@ fun RingActiveTimerContent(
     scaffoldPadding: PaddingValues,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    onSplit: () -> Boolean,
+    onUndoSplit: () -> Unit,
+    onSilence: () -> Unit,
     onFinish: () -> Unit,
     onDiscard: () -> Unit
 ) {
@@ -715,9 +718,11 @@ fun RingActiveTimerContent(
             ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        ScreenHeader("Circular focus", snapshot.subject, if (snapshot.running) "专注进行中" else "计时已暂停")
+        ScreenHeader("Circular focus", "题刻", "")
+        Spacer(Modifier.height(12.dp))
+        Text(snapshot.subject, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
         Box(
-            modifier = Modifier.fillMaxWidth().height(350.dp),
+            modifier = Modifier.fillMaxWidth().height(280.dp),
             contentAlignment = Alignment.Center
         ) {
             RingOrbit(
@@ -754,21 +759,8 @@ fun RingActiveTimerContent(
         if (snapshot.plannedQuestionCount != null) {
             Text("本轮计划 ${snapshot.plannedQuestionCount} 题", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Button(
-            onClick = if (snapshot.running) onPause else onResume,
-            modifier = Modifier.fillMaxWidth().height(54.dp),
-            shape = RoundedCornerShape(18.dp)
-        ) {
-            Icon(if (snapshot.running) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (snapshot.running) "暂停" else "继续")
-        }
-        Spacer(Modifier.height(10.dp))
-        TextButton(onClick = onFinish) {
-            Icon(Icons.Outlined.StopCircle, null)
-            Spacer(Modifier.width(6.dp))
-            Text("完成并记录")
-        }
+        Spacer(Modifier.height(12.dp))
+        SegmentTimerControls(snapshot, onSplit, onUndoSplit, onPause, onResume, onFinish, onSilence)
         TextButton(onClick = { showDiscardDialog = true }) {
             Icon(Icons.Outlined.DeleteOutline, null)
             Spacer(Modifier.width(6.dp))

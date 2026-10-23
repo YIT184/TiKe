@@ -12,7 +12,7 @@ import com.codex.shuatitimer.data.model.Subject
 
 @Database(
     entities = [Session::class, StudyModule::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -21,6 +21,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun moduleDao(): ModuleDao
 
     companion object {
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN segmentGroupId TEXT")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN segmentIndex INTEGER")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN segmentCount INTEGER")
+                db.execSQL("ALTER TABLE sessions ADD COLUMN segmentStartElapsedMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE sessions ADD COLUMN syncId TEXT NOT NULL DEFAULT ''")
@@ -54,7 +62,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "shuati_timer.db"
-                ).addMigrations(MIGRATION_1_2).addCallback(SEED_CALLBACK).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).addCallback(SEED_CALLBACK).build()
                     .also { INSTANCE = it }
             }
         }

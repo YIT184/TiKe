@@ -10,6 +10,12 @@ import com.codex.shuatitimer.timer.TimerStateStore
 class CountdownAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
+            CountdownAlertNotifier.ACTION_SILENCE -> {
+                val snapshot = TimerStateStore(context).snapshot()
+                if (intent.getStringExtra(CountdownAlertNotifier.EXTRA_TIMER_ID) == snapshot.sessionId) {
+                    CountdownAlertNotifier.silence(context)
+                }
+            }
             CountdownAlarmScheduler.ACTION_REACHED -> {
                 val snapshot = TimerStateStore(context).snapshot()
                 if (intent.getLongExtra(CountdownAlarmScheduler.EXTRA_TIMER_STARTED, -1L) != snapshot.startWallClock) return

@@ -58,7 +58,11 @@ object SyncCodec {
                 questionCount = j.nullableInt("questionCount"), correctCount = j.nullableInt("correctCount"),
                 note = if (j.isNull("note")) null else j.getString("note"),
                 syncId = j.getString("syncId"), updatedAt = j.requiredLong("updatedAt"), deleted = j.getBoolean("deleted"),
-                recoveredFromScreenshot = j.optBoolean("recoveredFromScreenshot", false)
+                recoveredFromScreenshot = j.optBoolean("recoveredFromScreenshot", false),
+                segmentGroupId = if (j.isNull("segmentGroupId")) null else j.getString("segmentGroupId"),
+                segmentIndex = j.nullableInt("segmentIndex"),
+                segmentCount = j.nullableInt("segmentCount"),
+                segmentStartElapsedMs = if (j.has("segmentStartElapsedMs")) j.requiredLong("segmentStartElapsedMs") else 0L
             )
         }
         val modules = (0 until names.length()).map { index ->
@@ -93,6 +97,12 @@ object SyncCodec {
             require(s.questionCount == null || s.questionCount >= 0) { "实际题数无效" }
             require(s.correctCount == null || (s.questionCount != null && s.correctCount in 0..s.questionCount)) { "正确题数无效" }
             require((s.note?.length ?: 0) <= 10_000) { "备注过长" }
+            require(s.segmentStartElapsedMs in 0..MAX_TIME && s.effectiveElapsedMs <= MAX_TIME - s.segmentStartElapsedMs) { "分段时间无效" }
+            if (s.segmentGroupId != null) {
+                require(s.segmentGroupId.matches(Regex("[a-zA-Z0-9-]{16,64}")) &&
+                    s.segmentCount != null && s.segmentCount in 2..1000 &&
+                    s.segmentIndex != null && s.segmentIndex in 1..s.segmentCount) { "分段信息无效" }
+            } else require(s.segmentIndex == null && s.segmentCount == null && s.segmentStartElapsedMs == 0L) { "分段信息不完整" }
         }
         bundle.modules.forEach {
             require(it.name.isNotBlank() && it.name == it.name.trim() && it.name.length <= 100 && it.name.none(Char::isISOControl)) { "模块名称无效" }
@@ -114,4 +124,7 @@ object SyncCodec {
         .put("plannedQuestionCount", s.plannedQuestionCount ?: JSONObject.NULL).put("subject", s.subject)
         .put("questionCount", s.questionCount ?: JSONObject.NULL).put("correctCount", s.correctCount ?: JSONObject.NULL)
         .put("note", s.note ?: JSONObject.NULL).put("recoveredFromScreenshot", s.recoveredFromScreenshot)
+        .put("segmentGroupId", s.segmentGroupId ?: JSONObject.NULL)
+        .put("segmentIndex", s.segmentIndex ?: JSONObject.NULL).put("segmentCount", s.segmentCount ?: JSONObject.NULL)
+        .put("segmentStartElapsedMs", s.segmentStartElapsedMs)
 }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.codex.shuatitimer"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.5.1"
+        versionCode = 12
+        versionName = "1.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -118,6 +118,8 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
+    // AndroidX keeps process-wide UI/factory state; isolate Robolectric test classes.
+    forkEvery = 1
     // README image generation uses native graphics and is an explicit tooling step.
     // Keep it out of the ordinary test run so CI does not rewrite documentation assets.
     if (!project.hasProperty("readmeScreenshots")) {

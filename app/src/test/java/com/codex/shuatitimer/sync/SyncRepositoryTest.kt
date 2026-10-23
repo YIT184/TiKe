@@ -40,6 +40,31 @@ class SyncRepositoryTest {
         mode = "COUNT_UP", subject = subject, questionCount = 10, correctCount = 8
     )
 
+    @Test fun segmentBatchIsAtomicRetrySafeAndKeepsItsMetadataAcrossSync() = runBlocking {
+        left.addModule("资料分析")
+        val group = "8183f986-e03a-4b09-b6cb-a26de88da427"
+        val records = listOf(
+            record().copy(segmentGroupId = group, segmentIndex = 1, segmentCount = 2),
+            record("新模块").copy(segmentGroupId = group, segmentIndex = 2, segmentCount = 2, segmentStartElapsedMs = 60_000)
+        )
+        try {
+            left.insertSegments(records)
+            fail("Unassigned module should reject the whole batch")
+        } catch (_: IllegalArgumentException) { }
+        assertTrue(left.allSessions.first().isEmpty())
+        left.addModule("新模块")
+        left.insertSegments(records)
+        left.insertSegments(records)
+        assertEquals(2, left.allSessions.first().size)
+        right.merge(SyncCodec.decode(SyncCodec.encode(left.snapshot())))
+        assertEquals(0, right.merge(left.snapshot()))
+        val restored = right.allSessions.first().sortedBy { it.segmentIndex }
+        assertEquals(listOf("资料分析", "新模块"), restored.map { it.subject })
+        assertEquals(listOf(1, 2), restored.map { it.segmentIndex })
+        assertEquals(120_000L, restored.sumOf { it.effectiveElapsedMs })
+        assertEquals(60_000L, restored.last().segmentStartElapsedMs)
+    }
+
     @Test fun mergesDifferentDevicesWithoutCollidingLocalIdsAndIsIdempotent() = runBlocking {
         left.insert(record())
         right.insert(record("言语理解"))

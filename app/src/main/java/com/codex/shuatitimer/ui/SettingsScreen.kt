@@ -3,6 +3,8 @@ package com.codex.shuatitimer.ui
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.media.RingtoneManager
+import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +26,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -44,6 +53,7 @@ import com.codex.shuatitimer.AppViewModel
 import com.codex.shuatitimer.data.model.TimerUiStyle
 import com.codex.shuatitimer.data.model.CountdownReminderMode
 import com.codex.shuatitimer.data.preferences.FloatingCapsuleSettings
+import com.codex.shuatitimer.data.preferences.CountdownReminderSettings
 
 @Composable
 fun SettingsScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
@@ -53,6 +63,18 @@ fun SettingsScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
     var capsuleEnabled by remember { mutableStateOf(capsuleSettings.enabled) }
     var overlayPermissionGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     var showSync by rememberSaveable { mutableStateOf(false) }
+    var chooseAlarmSound by rememberSaveable { mutableStateOf(false) }
+    val audioFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::setAlarmSound)
+    }
+    val systemSoundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.let { data ->
+                androidx.core.content.IntentCompat.getParcelableExtra(data, RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+                    ?.let(viewModel::setAlarmSound)
+            }
+        }
+    }
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -66,6 +88,35 @@ fun SettingsScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
     if (showSync) {
         SyncScreen(viewModel, scaffoldPadding, onBack = { showSync = false })
         return
+    }
+
+    if (chooseAlarmSound) {
+        AlertDialog(onDismissRequest = { chooseAlarmSound = false },
+            icon = { Icon(Icons.Outlined.MusicNote, null) }, title = { Text("更换闹铃声音") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(setup.alarmSoundName, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = {
+                        chooseAlarmSound = false
+                        try {
+                            systemSoundLauncher.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "选择闹铃声音")
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                                    CountdownReminderSettings(context).soundUri?.let(Uri::parse)
+                                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+                            })
+                        } catch (_: android.content.ActivityNotFoundException) { audioFileLauncher.launch(arrayOf("audio/*")) }
+                    }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("选择系统铃声") }
+                    OutlinedButton(onClick = { chooseAlarmSound = false; audioFileLauncher.launch(arrayOf("audio/*")) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("从本地音频选择") }
+                    TextButton(onClick = { viewModel.resetAlarmSound(); chooseAlarmSound = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("恢复系统默认闹铃")
+                    }
+                }
+            }, confirmButton = { TextButton(onClick = { chooseAlarmSound = false }) { Text("取消") } })
     }
 
     ArtfulBackground {
@@ -111,7 +162,7 @@ fun SettingsScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
 
             PaperCard {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    SectionTitle("02", "计时辅助", "只在计时页面开启时生效")
+                    SectionTitle("02", "计时辅助")
                     Spacer(Modifier.height(4.dp))
                     SettingSwitchRow(
                         title = "悬浮计时胶囊",
@@ -165,6 +216,23 @@ fun SettingsScreen(viewModel: AppViewModel, scaffoldPadding: PaddingValues) {
                             onClick = { viewModel.setCountdownReminderMode(CountdownReminderMode.ALARM) }
                         )
                     }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = !setup.importingAlarmSound) { chooseAlarmSound = true },
+                        shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    ) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.MusicNote, null, tint = MaterialTheme.colorScheme.primary)
+                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                Text("闹铃声音", style = MaterialTheme.typography.titleSmall)
+                                Text(if (setup.importingAlarmSound) "正在保存音频…" else setup.alarmSoundName,
+                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                            Icon(Icons.Outlined.ChevronRight, "更换闹铃声音", Modifier.size(20.dp))
+                        }
+                    }
+                    Text("到点后可在通知或计时页一键关闭铃声", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 

@@ -38,6 +38,9 @@ class CountdownAlarmTest {
         context = ApplicationProvider.getApplicationContext()
         store = TimerStateStore(context)
         store.clear()
+        CountdownAlertNotifier.dismiss(context)
+        CountdownReminderSettings(context).mode = CountdownReminderMode.MESSAGE
+        CountdownReminderSettings(context).setSound(null)
         alarms = context.getSystemService(AlarmManager::class.java)
         notifications = context.getSystemService(NotificationManager::class.java)
         ShadowAlarmManager.setAutoSchedule(false)
@@ -188,6 +191,37 @@ class CountdownAlarmTest {
         assertEquals(CountdownAlertNotifier.CHANNEL_ALARM, notification.channelId)
         val channel = notifications.getNotificationChannel(CountdownAlertNotifier.CHANNEL_ALARM)
         assertEquals(android.media.AudioAttributes.USAGE_ALARM, channel.audioAttributes.usage)
-        assertEquals(android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM), channel.sound)
+        assertNull(channel.sound)
+        assertTrue(store.snapshot().alarmRinging)
+        assertTrue(notification.actions.any { it.title == "关闭铃声" })
+    }
+
+    @Test fun quickSilenceCancelsAlarmWithoutStoppingTimerAndCannotSilenceAFutureTimer() {
+        val settings = CountdownReminderSettings(context)
+        settings.mode = CountdownReminderMode.ALARM
+        settings.setSound("file:///private/chosen.ogg", "我的闹铃")
+        assertEquals("我的闹铃", CountdownReminderSettings(context).soundName)
+        assertEquals("file:///private/chosen.ogg", CountdownReminderSettings(context).soundUri)
+        store.start(TimerMode.COUNT_DOWN, "资料分析", 1_000L, null)
+        ShadowSystemClock.advanceBy(Duration.ofMillis(1_000))
+        assertTrue(CountdownAlertNotifier.notifyIfReached(context))
+        val notification = shadowOf(notifications).getNotification(CountdownAlertNotifier.NOTIFICATION_ID)
+        val oldSilence = notification.actions.single { it.title == "关闭铃声" }.actionIntent
+        oldSilence.send()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(store.snapshot().alarmRinging)
+        assertTrue(store.snapshot().running)
+        assertTrue(store.snapshot().countdownAlertSent)
+        assertNull(shadowOf(notifications).getNotification(CountdownAlertNotifier.NOTIFICATION_ID))
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_000))
+        assertEquals(3_000L, store.snapshot().effectiveElapsedMs)
+        assertFalse(CountdownAlertNotifier.notifyIfReached(context))
+        val previousId = store.snapshot().sessionId
+        store.start(TimerMode.COUNT_DOWN, "新计时", 1_000L, null)
+        store.setAlarmRinging(true)
+        CountdownAlarmReceiver().onReceive(context, Intent(CountdownAlertNotifier.ACTION_SILENCE)
+            .putExtra(CountdownAlertNotifier.EXTRA_TIMER_ID, previousId))
+        assertTrue(store.snapshot().alarmRinging)
+        CountdownAlertNotifier.silence(context)
     }
 }

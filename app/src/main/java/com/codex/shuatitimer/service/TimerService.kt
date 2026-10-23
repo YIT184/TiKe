@@ -10,12 +10,14 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.codex.shuatitimer.MainActivity
 import com.codex.shuatitimer.R
@@ -55,7 +57,7 @@ class TimerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action ?: ACTION_START) {
-            ACTION_PAUSE -> store.pause()
+            ACTION_PAUSE -> { CountdownAlertNotifier.silence(this); store.pause() }
             ACTION_RESUME -> store.resume()
             ACTION_STOP -> {
                 endLiveWindowAndStop(intent?.getBooleanExtra(EXTRA_CLEAR_TIMER, false) == true)
@@ -69,14 +71,19 @@ class TimerService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        startForeground(
+        ServiceCompat.startForeground(
+            this,
             TIMER_NOTIFICATION_ID,
             buildTimerNotification(
                 snapshot,
                 if (liveWindowCreated) LiveWindowExtras.Operation.UPDATE
                 else LiveWindowExtras.Operation.CREATE
-            )
+            ),
+            if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                (if (snapshot.alarmRinging) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0)
+            else if (snapshot.alarmRinging) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0
         )
+        AlarmSoundPlayer.sync(this)
         liveWindowCreated = true
         CountdownAlarmScheduler.sync(this)
         syncFloatingOverlay(snapshot)
@@ -87,6 +94,7 @@ class TimerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        AlarmSoundPlayer.stop()
         tickerJob?.cancel()
         mainHandler.removeCallbacksAndMessages(null)
         floatingOverlay.hide()
@@ -101,6 +109,7 @@ class TimerService : Service() {
             var showingOvertime = false
             while (isActive) {
                 val snapshot = store.snapshot()
+                if (!snapshot.alarmRinging) AlarmSoundPlayer.stop()
                 if (!snapshot.active) {
                     stopSelf()
                     break
@@ -241,6 +250,7 @@ class TimerService : Service() {
     private fun toggleTimerFromOverlay() {
         val before = store.snapshot()
         if (!before.active || before.completed) return
+        CountdownAlertNotifier.silence(this)
         val updated = if (before.running) store.pause() else store.resume()
         CountdownAlarmScheduler.sync(this)
         notifyTimer(updated)
@@ -263,6 +273,7 @@ class TimerService : Service() {
     }
 
     private fun endLiveWindowAndStop(clearTimer: Boolean) {
+        CountdownAlertNotifier.silence(this)
         tickerJob?.cancel()
         CountdownAlarmScheduler.cancel(this)
         floatingOverlay.hide()
@@ -313,6 +324,7 @@ class TimerService : Service() {
         const val ACTION_PAUSE = "com.codex.shuatitimer.action.PAUSE"
         const val ACTION_RESUME = "com.codex.shuatitimer.action.RESUME"
         const val ACTION_STOP = "com.codex.shuatitimer.action.STOP"
+        const val ACTION_START_ALARM = "com.codex.shuatitimer.action.START_ALARM"
         private const val EXTRA_CLEAR_TIMER = "clear_timer"
 
         // A new ID is intentional: Android does not allow an installed channel's

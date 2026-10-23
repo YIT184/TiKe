@@ -16,7 +16,10 @@ import com.codex.shuatitimer.data.preferences.UserPreferences
 import com.codex.shuatitimer.data.repository.SessionRepository
 import com.codex.shuatitimer.service.TimerService
 import com.codex.shuatitimer.service.CountdownAlarmScheduler
+import com.codex.shuatitimer.service.CountdownAlertNotifier
 import com.codex.shuatitimer.timer.TimerStateStore
+import com.codex.shuatitimer.timer.SegmentResult
+import com.codex.shuatitimer.timer.SegmentSessionBuilder
 import com.codex.shuatitimer.util.CsvExporter
 import com.codex.shuatitimer.util.StatisticsCalculator
 import com.codex.shuatitimer.util.TimeUtils
@@ -61,6 +64,8 @@ data class TimerSetupUiState(
     val timerUiStyle: TimerUiStyle = TimerUiStyle.CLASSIC,
     val keepScreenOn: Boolean = false,
     val countdownReminderMode: CountdownReminderMode = CountdownReminderMode.MESSAGE,
+    val alarmSoundName: String = "系统默认闹铃",
+    val importingAlarmSound: Boolean = false,
     val loaded: Boolean = false
 ) {
     val resolvedSubject: String
@@ -71,7 +76,9 @@ data class FinishDialogState(
     val visible: Boolean = false,
     val snapshot: TimerStateStore.Snapshot = TimerStateStore.Snapshot(),
     val finishWallClock: Long = 0L,
-    val resumeIfCancelled: Boolean = false
+    val resumeIfCancelled: Boolean = false,
+    val saving: Boolean = false,
+    val error: String? = null
 )
 
 data class SubjectStatistics(
@@ -178,6 +185,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 timerUiStyle = preferences.timerUiStyle.first(),
                 keepScreenOn = preferences.keepScreenOn.first(),
                 countdownReminderMode = countdownReminderSettings.mode,
+                alarmSoundName = countdownReminderSettings.soundName,
                 loaded = true
             )
             repository.activeModules.collect { modules ->
@@ -222,6 +230,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addSegmentModule(name: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val error = runCatching { repository.addModule(name) }.getOrElse { "模块保存失败，请重试" }
+            onResult(error)
+        }
+    }
+
     fun deleteModule(name: String) {
         viewModelScope.launch {
             repository.deleteModule(name)
@@ -259,6 +274,84 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _setup.update { it.copy(countdownReminderMode = mode) }
     }
 
+    fun resetAlarmSound() {
+        countdownReminderSettings.setSound(null)
+        _setup.update { it.copy(alarmSoundName = countdownReminderSettings.soundName) }
+    }
+
+    fun setAlarmSound(uri: Uri) {
+        if (_setup.value.importingAlarmSound) return
+        _setup.update { it.copy(importingAlarmSound = true) }
+        viewModelScope.launch {
+            try {
+                val name = withContext(Dispatchers.IO) {
+                    val defaultUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                    if (uri == defaultUri) {
+                        countdownReminderSettings.setSound(null)
+                    } else {
+                        val title = runCatching {
+                            appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                                if (it.moveToFirst()) it.getString(0) else null
+                            }
+                        }.getOrNull() ?: runCatching {
+                            android.media.RingtoneManager.getRingtone(appContext, uri)?.getTitle(appContext)
+                        }.getOrNull() ?: "自选闹铃"
+                        val directory = File(appContext.noBackupFilesDir, "alarm-sounds").apply { mkdirs() }
+                        val temp = File(directory, "selected.tmp")
+                        try {
+                            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                                temp.outputStream().use { output ->
+                                    val buffer = ByteArray(8192)
+                                    var total = 0L
+                                    while (true) {
+                                        val count = input.read(buffer)
+                                        if (count < 0) break
+                                        total += count
+                                        require(total <= 20 * 1024 * 1024) { "请选择不超过 20 MB 的音频" }
+                                        output.write(buffer, 0, count)
+                                    }
+                                    require(total > 0) { "音频文件为空" }
+                                }
+                            } ?: error("无法读取所选音频")
+                            val retriever = android.media.MediaMetadataRetriever()
+                            try {
+                                retriever.setDataSource(temp.path)
+                                require((retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) > 0L) {
+                                    "请选择有效的音频文件"
+                                }
+                            } finally { retriever.release() }
+                            val file = File(directory, "selected.audio")
+                            java.nio.file.Files.move(temp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                            countdownReminderSettings.setSound(Uri.fromFile(file).toString(), title.take(100))
+                        } finally { temp.delete() }
+                    }
+                    countdownReminderSettings.soundName
+                }
+                _setup.update { it.copy(alarmSoundName = name) }
+                showMessage("闹铃声音已保存")
+            } catch (e: Exception) {
+                showMessage(e.message?.takeIf { it.startsWith("请选择") || it == "音频文件为空" } ?: "无法使用此音频，请重新选择")
+            } finally { _setup.update { it.copy(importingAlarmSound = false) } }
+        }
+    }
+
+    fun silenceAlarm() {
+        CountdownAlertNotifier.silence(appContext)
+        _timer.value = timerStore.snapshot()
+    }
+
+    fun splitTimer(): Boolean {
+        if (_finishDialog.value.visible) return false
+        val before = timerStore.snapshot()
+        val after = timerStore.split()
+        _timer.value = after
+        return after.segmentBoundaries.size > before.segmentBoundaries.size
+    }
+
+    fun undoSplit() {
+        if (!_finishDialog.value.visible) _timer.value = timerStore.undoSplit()
+    }
+
     fun startTimer(): String? {
         val setupState = _setup.value
         if (!setupState.loaded || setupState.resolvedSubject !in setupState.modules) {
@@ -285,6 +378,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             plannedQuestionCount = setupState.plannedQuestions
         )
         _timer.value = snapshot
+        CountdownAlertNotifier.dismiss(appContext)
         CountdownAlarmScheduler.sync(appContext)
         viewModelScope.launch {
             preferences.setLastSubject(setupState.resolvedSubject)
@@ -298,6 +392,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pauseTimer() {
+        silenceAlarm()
         _timer.value = timerStore.pause()
         CountdownAlarmScheduler.sync(appContext)
         appContext.startService(TimerService.intent(appContext, TimerService.ACTION_PAUSE))
@@ -312,6 +407,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun requestFinish() {
         val before = timerStore.snapshot()
         if (!before.active || _finishDialog.value.visible) return
+        silenceAlarm()
         val captured = if (before.running) timerStore.pause() else before
         CountdownAlarmScheduler.sync(appContext)
         if (before.running) {
@@ -328,6 +424,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun cancelFinish() {
         val dialog = _finishDialog.value
+        if (dialog.saving) return
         _finishDialog.value = FinishDialogState()
         if (dialog.resumeIfCancelled) resumeTimer()
     }
@@ -345,32 +442,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (correct > questions) return "正确题数不能大于实际题数"
         val dialog = _finishDialog.value
         if (!dialog.visible || !dialog.snapshot.active) return "当前没有可保存的计时"
-        val snapshot = dialog.snapshot
-        val session = Session(
-            startWallClock = snapshot.startWallClock,
-            endWallClock = dialog.finishWallClock,
-            effectiveElapsedMs = snapshot.effectiveElapsedMs,
-            accumulatedPausedMs = snapshot.accumulatedPausedMs,
-            mode = snapshot.mode.name,
-            targetDurationMs = snapshot.targetDurationMs,
-            plannedQuestionCount = snapshot.plannedQuestionCount,
-            subject = snapshot.subject,
-            questionCount = questions,
-            correctCount = correct,
-            note = note.trim().takeIf { it.isNotBlank() }
-        )
-        _finishDialog.value = FinishDialogState()
-        _timer.value = TimerStateStore.Snapshot()
-        CountdownAlarmScheduler.cancel(appContext)
+        return saveFinishedSegments(listOf(SegmentResult(dialog.snapshot.subject, questions.toString(), correct.toString())), note)
+    }
+
+    fun saveFinishedSegments(results: List<SegmentResult>, note: String): String? {
+        val dialog = _finishDialog.value
+        if (!dialog.visible || !dialog.snapshot.active) return "当前没有可保存的计时"
+        if (dialog.saving) return null
+        val records = try {
+            SegmentSessionBuilder.build(dialog.snapshot, dialog.finishWallClock, results, _setup.value.modules, note)
+        } catch (e: IllegalArgumentException) { return e.message }
+        _finishDialog.update { it.copy(saving = true, error = null) }
         viewModelScope.launch {
-            repository.insert(session)
-            appContext.startService(TimerService.stopAndClearIntent(appContext))
-            _events.emit(UiEvent.SessionSaved)
+            try {
+                repository.insertSegments(records)
+                CountdownAlertNotifier.silence(appContext)
+                timerStore.clear()
+                _timer.value = TimerStateStore.Snapshot()
+                CountdownAlarmScheduler.cancel(appContext)
+                appContext.startService(TimerService.stopAndClearIntent(appContext))
+                _finishDialog.value = FinishDialogState()
+                _events.emit(UiEvent.SessionSaved)
+            } catch (_: Exception) {
+                _finishDialog.update { it.copy(saving = false, error = "保存失败，分段仍已保留，请重试") }
+            }
         }
         return null
     }
 
     fun discardTimer() {
+        if (_finishDialog.value.saving) return
+        CountdownAlertNotifier.silence(appContext)
+        timerStore.clear()
         _finishDialog.value = FinishDialogState()
         _timer.value = TimerStateStore.Snapshot()
         CountdownAlarmScheduler.cancel(appContext)
@@ -385,10 +488,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         note: String
     ): String? {
         val questions = questionText.trim().toIntOrNull()
-            ?: return "请填写实际题数（可以填 0）"
         val correct = correctText.trim().toIntOrNull()
-            ?: return "请填写正确题数（可以填 0）"
-        if (questions < 0 || correct < 0 || correct > questions) {
+        if (questionText.isNotBlank() && (questions == null || questions !in 0..9_999)) {
+            return "实际题数需在 0–9999 之间"
+        }
+        if (correctText.isNotBlank() && (correct == null || correct !in 0..9_999)) {
+            return "正确题数需在 0–9999 之间"
+        }
+        if (correct != null && (questions == null || correct > questions)) {
             return "正确题数需在 0 到实际题数之间"
         }
         viewModelScope.launch {
@@ -438,7 +545,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             allTimeTotalCount = all.size,
             allTimeTotalDuration = totalDuration,
             allTimeTotalQuestions = totalQuestions,
-            allTimeTotalCorrect = totalCorrect
+            allTimeTotalCorrect = totalCorrect,
+            allTimeTimedQuestionDurationMs = all.filter { (it.questionCount ?: 0) > 0 }.sumOf { it.effectiveElapsedMs },
+            allTimeGradedQuestionCount = all.filter { it.correctCount != null }.sumOf { (it.questionCount ?: 0).toLong() }
         )
         val subjects = StatisticsCalculator.computeSubjectStats(all)
         return StatisticsUiState(
